@@ -1,19 +1,44 @@
 from util import *
+import ipdb
 
 class Dataset:
     def __init__(self, train_input_dirname, train_output_dirname, test_input_dirname):
-        self.train_input = []
-        self.train_output = []
-        self.test_input = []
-        self.test_input_ids = []
-        for filename in tqdm(os.listdir(train_input_dirname), "Loading training input"):
-            self.train_input.append(np.array(Image.open(train_input_dirname + filename)))
-        for filename in tqdm(os.listdir(train_output_dirname), "Loading training output"):
-            self.train_output.append(np.array(Image.open(train_output_dirname + filename)))
-        for filename in tqdm(os.listdir(test_input_dirname), "Loading testing input"):
-            self.test_input.append(np.array(Image.open(test_input_dirname + filename)))
-            img_number = int(re.search(r"\d+", filename).group(0))
-            self.test_input_ids.append(img_number)
+        # Initialize dataset root and define cache path
+        if train_input_dirname.split("/")[-1] == "":
+            self.dataset_root = "/".join(train_input_dirname.split("/")[:-2])
+        else:
+            self.dataset_root = "/".join(train_input_dirname.split("/")[:-1])
+        self.cache_dirname = os.path.join(self.dataset_root, "cache")
+        self.cache_filename = os.path.join(self.cache_dirname, "dataset_cache.pkl")
+
+        # Check if cached dataset exists
+        if os.path.exists(self.cache_filename):
+            print("[Info]: Found dataset cache. Load from cache!")
+            data = self.load_filename_dataset_from_cache()
+            self.train_input = data["train_input"]
+            self.train_output = data["train_output"]
+            self.test_input = data["test_input"]
+            self.test_input_ids = data["test_input_ids"]
+
+        else:
+            # Load raw data from disk
+            self.train_input = []
+            self.train_output = []
+            self.test_input = []
+            self.test_input_ids = []
+            print("[Info]: Can't find dataset cache.")
+            print("[Info]: Loading raw data from disk.")
+            for filename in tqdm(os.listdir(train_input_dirname), "Loading training input"):
+                self.train_input.append(np.array(Image.open(train_input_dirname + filename)))
+            for filename in tqdm(os.listdir(train_output_dirname), "Loading training output"):
+                self.train_output.append(np.array(Image.open(train_output_dirname + filename)))
+            for filename in tqdm(os.listdir(test_input_dirname), "Loading testing input"):
+                self.test_input.append(np.array(Image.open(test_input_dirname + filename)))
+                img_number = int(re.search(r"\d+", filename).group(0))
+                self.test_input_ids.append(img_number)
+
+            # Create dataset cache from raw data
+            self.create_dataset_cache()
 
     def __kmeans(self, X, k):
         # Initialize centers as k randomly chosen points
@@ -59,4 +84,33 @@ class Dataset:
         for i in tqdm(range(len(self.test_input)), "Preprocessing testing input"):
             im = self.test_input[i]
             self.test_input[i] = self.__quantize(im, num_buckets)
+
+    # Load data from pkl cache
+    def load_filename_dataset_from_cache(self):
+        # Try to load the dataset...
+        try:
+            with open(self.cache_filename, 'rb') as f:
+                data = pickle.load(f)
+
+            return data
+
+        except:
+            raise ValueError("[Error] Errors occur in loading data")
+
+    # Create dataset cache from data
+    def create_dataset_cache(self):
+        # check directory
+        if not os.path.exists(self.cache_dirname):
+            os.makedirs(self.cache_dirname)
+        data = {
+            "train_input": self.train_input,
+            "train_output": self.train_output,
+            "test_input": self.test_input,
+            "test_input_ids": self.test_input_ids
+        }
+        with open(self.cache_filename, 'wb') as f:
+            pickle.dump(data, f)
+
+        print("[Info] Successfully cached filename dataset!!")
+
 
