@@ -16,6 +16,8 @@ from deeplab import model
 from deeplab.utils import train_utils
 from tensorflow.keras import backend as K
 
+import ipdb
+
 
 gpunumber = 0
 os.environ["CUDA_VISIBLE_DEVICES"]= str(gpunumber)
@@ -170,6 +172,7 @@ def buildExternalDataset ( data_path, batch_size = 16, shuffle = True, crop_size
 
     return train_dataset, test_dataset
 
+
 def buildTestDataset ( data_path, batch_size = 16, buffer = 30):
     def _load_test_image(image_path, ids):
         image = tf.io.read_file(image_path)
@@ -191,7 +194,7 @@ def buildTestDataset ( data_path, batch_size = 16, buffer = 30):
     return dataset
 
 
-def buildTrainDataset( data_path, batch_size = 16, shuffle = True, crop_size = [None, None], augment = False, buffer = 30):
+def buildTrainDataset(data_path, batch_size = 16, shuffle = True, crop_size = [None, None], augment = False, buffer = 30):
 
     def _load_image_label(image_path, label_path):
         image = tf.io.read_file(image_path)

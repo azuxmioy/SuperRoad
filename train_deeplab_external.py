@@ -15,6 +15,7 @@ from deeplab import common
 from deeplab import model
 from deeplab.utils import train_utils
 from tensorflow.keras import backend as K
+import ipdb
 
 
 gpunumber = 0
@@ -48,28 +49,15 @@ flags.DEFINE_float('d_lr', 1e-6, 'learning rate')
 flags.DEFINE_float('alpha', 0.85, 'balance param')
 
 # Deeplab param
-
-flags.DEFINE_multi_integer('train_crop_size', None,
-                           'Image crop size [height, width] during training.')
-
-flags.DEFINE_multi_integer('atrous_rates',  [6, 12, 18],
-                           'Atrous rates for atrous spatial pyramid pooling.')
-
-flags.DEFINE_integer('output_stride', 16,
-                     'The ratio of input to output spatial resolution.')
-
-flags.DEFINE_boolean('last_layers_contain_logits_only', False,
-                     'Only consider logits as last layers or not.')
+flags.DEFINE_multi_integer('train_crop_size', None, 'Image crop size [height, width] during training.')
+flags.DEFINE_multi_integer('atrous_rates',  [6, 12, 18], 'Atrous rates for atrous spatial pyramid pooling.')
+flags.DEFINE_integer('output_stride', 16, 'The ratio of input to output spatial resolution.')
+flags.DEFINE_boolean('last_layers_contain_logits_only', False, 'Only consider logits as last layers or not.')
 
 # Set to False if one does not want to re-use the trained classifier weights.
-flags.DEFINE_boolean('initialize_last_layer', True,
-                     'Initialize the last layer.')
-
-flags.DEFINE_string('train_logdir', 'resnet_v1_50',
-                    'Where the checkpoint and logs are stored.')
-
-flags.DEFINE_string('tf_initial_checkpoint', 'resnet_v1_50/model.ckpt',
-                    'The initial checkpoint in tensorflow format.')
+flags.DEFINE_boolean('initialize_last_layer', True, 'Initialize the last layer.')
+flags.DEFINE_string('train_logdir', 'resnet_v1_50', 'Where the checkpoint and logs are stored.')
+flags.DEFINE_string('tf_initial_checkpoint', 'resnet_v1_50/model.ckpt', 'The initial checkpoint in tensorflow format.')
 
 FLAGS = flags.FLAGS
 
@@ -78,8 +66,10 @@ save_model_path = None
 save_output_path = None
 
 
-def buildExternalDataset ( data_path, batch_size = 16, shuffle = True, crop_size = [512, 512], resize = [512, 512], augment = False, buffer = 30):
-    
+# Initialize external dataset
+def buildExternalDataset(data_path, batch_size = 16, shuffle = True,
+                         crop_size = [512, 512], resize = [512, 512],
+                         augment = False, buffer = 30):
     def _random_crop(image, label, size):
 
         combined = tf.concat([image, label], axis=2)
@@ -169,6 +159,7 @@ def buildExternalDataset ( data_path, batch_size = 16, shuffle = True, crop_size
 
     return train_dataset, test_dataset
 
+# Build the testing dataset
 def buildTestDataset ( data_path, batch_size = 16, buffer = 30):
     def _load_test_image(image_path, ids):
         image = tf.io.read_file(image_path)
@@ -181,17 +172,15 @@ def buildTestDataset ( data_path, batch_size = 16, buffer = 30):
     ids = [int(re.search(r"\d+", path).group(0)) for path in all_test_image_paths]
 
     dataset = tf.data.Dataset.from_tensor_slices((all_test_image_paths, ids))
-
     dataset = dataset.map(_load_test_image).prefetch(buffer)
-
     dataset = dataset.batch(batch_size)
-
 
     return dataset
 
 
-def buildTrainDataset( data_path, batch_size = 16, shuffle = True, crop_size = [None, None], augment = False, buffer = 30):
-
+# Build the training dataset
+def buildTrainDataset(data_path, batch_size=16, shuffle=True, crop_size=[None, None],
+                      augment=False, buffer=30):
     def _load_image_label(image_path, label_path):
         image = tf.io.read_file(image_path)
         image = tf.io.decode_png(image)
@@ -204,7 +193,6 @@ def buildTrainDataset( data_path, batch_size = 16, shuffle = True, crop_size = [
         label = tf.cast(label,tf.uint8)
 
         return image, label
-
 
     def _random_crop(image, label, size):
 
@@ -263,8 +251,8 @@ def buildTrainDataset( data_path, batch_size = 16, shuffle = True, crop_size = [
     return dataset
 
 
+# Convert predictions to submission format
 def create_submission_files(test_predictions, test_ids, output_path, count):
-
     def patch_to_label(patch):
         # percentage of pixels > 1 required to assign a foreground label to a patch
         foreground_threshold = 0.25
@@ -289,6 +277,8 @@ def create_submission_files(test_predictions, test_ids, output_path, count):
                         label = patch_to_label(patch)
                         outcsv.writelines("{:03d}_{}_{},{}\n".format(img_number, j, i, label))
 
+
+# Output predicted probability to soft label masks
 def create_soft_label_mask(soft_masks, output_path, count):
 
     file_path = os.path.join(output_path, 'softLabels_'+str(count)+'.pkl' )
@@ -311,8 +301,9 @@ def _variable_summaries(var):
         tf.summary.scalar('min', tf.reduce_min(var))
         tf.summary.histogram('histogram', var)
 
-def main(_):
 
+def main(_):
+    ipdb.set_trace()
     model_options1 = common.ModelOptions(
                     outputs_to_num_classes=2,
                     crop_size=None,
@@ -538,9 +529,9 @@ def main(_):
             decoder_saver.save(sess, os.path.join(save_model_path, 'decoder.ckpt'), global_step = step)
 
 
-
+# Main function
 if __name__ == '__main__':
-        
+    # Check save paths and previous runs
     if not tf.gfile.Exists(FLAGS.save_path):
         tf.gfile.MakeDirs(FLAGS.save_path)
     previous_runs = os.listdir(FLAGS.save_path)
@@ -548,7 +539,8 @@ if __name__ == '__main__':
         run_number = 1
     else:
         run_number = len(previous_runs) + 1
-        
+
+    # Make experiment output directories
     rundir = 'run_%02d' % run_number
     save_log_path = os.path.join(FLAGS.save_path, rundir + '/logs')
     save_model_path = os.path.join(FLAGS.save_path, rundir + '/model')

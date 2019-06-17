@@ -1,0 +1,19 @@
+# dataset related config
+data_path: "dataset/"
+# dataset mode between "cil", "external"
+dataset: "cil"
+
+# Output related config
+save_path: "experiments"
+save_soft_mask: True
+save_csv_file: True
+
+# Network related config
+model: "fcn_vgg"
+encoder_path: "resnet_v1_50"
+encoder_model: 'pretrained/encoder.ckpt-16000'
+decoder_model: 'pretrained/decoder.ckpt-16000'
+
+# Training parameters
+train_crop_size: [400, 400]
+batch_size: 16

@@ -16,6 +16,15 @@ Kaggle: https://inclass.kaggle.com/c/cil-road-segmentation-2019
 
 Look at `example_method.py` and `example_main.py`.
 
+## Some Documentation
+* `dataset/`: dataset images, dataloader class, etc.
+* `deeplab/`: codes for deeplab method.
+* `methods/`: other baseline methods.
+* `nets`: all the deep learning feature extractors.
+* `postprocessing`: all the post-processing pipeline related codes.
+* `resnet_v1_50`: pre-trained model for resnet50.
+* `xception`: pre-trained model for xception.
+
 ## Brief description of files and classes
 
 `dataset/train_input/`: All training images
