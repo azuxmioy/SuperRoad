@@ -16,14 +16,19 @@ Kaggle: https://inclass.kaggle.com/c/cil-road-segmentation-2019
 
 Look at `example_method.py` and `example_main.py`.
 
-## Some Documentation
+## Some Documentations
+* `config/`: Place to put config files for all the methods added after deeplab. 
 * `dataset/`: dataset images, dataloader class, etc.
+  * `cil_dataloader.py`: tf dataset for cil dataset.
+  * `external_dataloader.py`: tf dataset for external dataset.
+  * Later we might have second external dataset from CVPR challenge.
 * `deeplab/`: codes for deeplab method.
 * `methods/`: other baseline methods.
 * `nets`: all the deep learning feature extractors.
 * `postprocessing`: all the post-processing pipeline related codes.
 * `resnet_v1_50`: pre-trained model for resnet50.
 * `xception`: pre-trained model for xception.
+* `utils`: Put some useful but ugly codes that you don't want to have in main files.
 
 ## Brief description of files and classes
 
