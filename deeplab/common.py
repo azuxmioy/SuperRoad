@@ -44,7 +44,7 @@ flags.DEFINE_integer('logits_kernel_size', 1,
 # When using 'xception_65' or 'resnet_v1' model variants, we set
 # atrous_rates = [6, 12, 18] (output stride 16) and decoder_output_stride = 4.
 # See core/feature_extractor.py for supported model variants.
-flags.DEFINE_string('model_variant', 'resnet_v1_50_beta', 'DeepLab model variant.')
+flags.DEFINE_string('model_variant', 'xception_71', 'DeepLab model variant.')
 
 flags.DEFINE_multi_float('image_pyramid', None,
                          'Input scales for multi-scale feature extraction.')
@@ -70,7 +70,7 @@ flags.DEFINE_boolean('aspp_with_separable_conv', True,
 
 # Defaults to None. Set multi_grid = [1, 2, 4] when using provided
 # 'resnet_v1_{50,101}_beta' checkpoints.
-flags.DEFINE_multi_integer('multi_grid', [1, 2, 4],
+flags.DEFINE_multi_integer('multi_grid', None,
                            'Employ a hierarchy of atrous rates for ResNet.')
 
 flags.DEFINE_float('depth_multiplier', 1.0,
