@@ -27,6 +27,7 @@ from dataset.cil_dataloader import train_dataset as cil_train_dataset
 from dataset.cil_dataloader import test_dataset as cil_test_dataset
 from dataset.external_dataloader import external_dataset
 from methods.fcn_vgg import fcn_vgg
+from methods.deeplabv3 import deeplabv3
 import ipdb
 
 
@@ -111,6 +112,10 @@ def get_model(config=None, data=None, mode="train"):
     # Check models
     if config.model == "fcn_vgg":
         model = fcn_vgg(config, data, mode)
+        raise NotImplementedError
+
+    elif config.model == "deeplabv3+":
+        model =
 
     elif config.model == "fcn_resnet":
         raise NotImplementedError
