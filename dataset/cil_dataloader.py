@@ -99,3 +99,33 @@ def test_dataset(data_path, batch_size=16, buffer=30):
 
 
     return dataset
+
+
+# validation dataloader for cil dataset
+def val_dataset(data_path, batch_size=16, buffer=30):
+    def _load_image_label(image_path, label_path):
+        image = tf.io.read_file(image_path)
+        image = tf.io.decode_png(image)
+        label = tf.io.read_file(label_path)
+        label = tf.io.decode_png(label)
+        label = label / 255
+        label = tf.math.round(label)
+
+        #label = tf.div(tf.io.decode_png(label), 255 )
+        label = tf.cast(label,tf.uint8)
+
+        return image, label
+
+    all_valid_image = os.listdir(data_path + 'valid_input/')
+    all_valid_label = os.listdir(data_path + 'valid_output/')
+
+    all_valid_image_paths = sorted([ data_path + 'valid_input/' + str(path) for path in all_valid_image])
+    all_valid_label_paths = sorted([ data_path + 'valid_output/' + str(path) for path in all_valid_label])
+
+    dataset = tf.data.Dataset.from_tensor_slices((all_valid_image_paths, all_valid_label_paths))
+
+    dataset = dataset.map(_load_image_label).prefetch(buffer)
+
+    dataset = dataset.batch(batch_size)
+
+    return dataset

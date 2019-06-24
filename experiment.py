@@ -25,6 +25,7 @@ import yaml
 from collections import namedtuple
 from dataset.cil_dataloader import train_dataset as cil_train_dataset
 from dataset.cil_dataloader import test_dataset as cil_test_dataset
+from dataset.cil_dataloader import val_dataset as cil_val_dataset
 from dataset.external_dataloader import external_dataset
 from methods.fcn_vgg import fcn_vgg
 from methods.deeplabv3 import deeplabv3
@@ -65,6 +66,9 @@ def get_data(config=None):
                                           shuffle=True,
                                           crop_size=config.train_crop_size,
                                           augment=True)
+        val_dataset = cil_val_dataset(data_path=config.data_path,
+                                      batch_size=1,
+                                      buffer=30)
         test_dataset = cil_test_dataset(data_path=config.data_path,
                                         batch_size=1)
 
@@ -88,11 +92,26 @@ def get_data(config=None):
     train_images, train_labels = train_iterator.get_next()
     test_images = test_iterator.get_next()
 
-    return {
-        "train_images": train_images,
-        "train_labels": train_labels,
-        "test_images": test_images
-    }
+    if config.dataset_name == "external":
+        return {
+            "train_images": train_images,
+            "train_labels": train_labels,
+            "test_images": test_images
+        }
+
+    else:
+        # Get the validation dataset
+        # ToDo: Actually we can still have validation set for train external
+        val_iterator = val_dataset.make_one_shot_iterator()
+        val_images, val_labels = val_iterator.get_next()
+
+        return {
+            "train_images": train_images,
+            "train_labels": train_labels,
+            "val_images": val_images,
+            "val_labels": val_labels,
+            "test_images": test_images
+        }
 
 
 # Get model by model name
@@ -115,7 +134,7 @@ def get_model(config=None, data=None, mode="train"):
         raise NotImplementedError
 
     elif config.model == "deeplabv3+":
-        model =
+        model = deeplabv3()
 
     elif config.model == "fcn_resnet":
         raise NotImplementedError
@@ -144,6 +163,8 @@ def train(args=None, config=None):
     # Create model
     with tf.name_scope("segmentation_model"):
         model = get_model(config=config, data=data, mode="train")
+
+
 
 
 def main(args):

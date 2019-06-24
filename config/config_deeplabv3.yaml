@@ -1,0 +1,28 @@
+# dataset related config
+data_path: "dataset/"
+# dataset mode between "cil", "external"
+dataset: "cil"
+
+# Output related config
+save_path: "experiments"
+save_soft_mask: True
+save_csv_file: True
+
+# Network related config
+model: "deeplabv3+"
+# ToDo: Should we include pretrain path?
+encoder_path: "resnet_v1_50"
+encoder_model: 'pretrained/encoder.ckpt-16000'
+decoder_model: 'pretrained/decoder.ckpt-16000'
+atrous_rates: [6, 12, 18]
+output_stride: 16
+# Learning rate
+f_lr: 3e-6
+d_lr: 3e-6
+momentum: 0.9
+# The weighting of the loss
+alpha: 0.7
+
+# Training parameters
+train_crop_size: [400, 400]
+batch_size: 16
