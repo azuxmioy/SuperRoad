@@ -9,6 +9,8 @@ import sys
 import urllib
 import matplotlib.image as mpimg
 from PIL import Image
+import re
+import csv
 
 import code
 
@@ -17,14 +19,16 @@ import tensorflow.python.platform
 import numpy
 import tensorflow as tf
 
+import ipdb
+
 NUM_CHANNELS = 3  # RGB images
 PIXEL_DEPTH = 255
 NUM_LABELS = 2
-TRAINING_SIZE = 20
+TRAINING_SIZE = 100
 VALIDATION_SIZE = 5  # Size of the validation set.
 SEED = 66478  # Set to None for random seed.
 BATCH_SIZE = 16  # 64
-NUM_EPOCHS = 5
+NUM_EPOCHS = 20
 RESTORE_MODEL = False  # If True, restore existing model instead of training a new one
 RECORDING_STEP = 1000
 
@@ -33,7 +37,7 @@ RECORDING_STEP = 1000
 # image size should be an integer multiple of this number!
 IMG_PATCH_SIZE = 16
 
-tf.app.flags.DEFINE_string('train_dir', '/tmp/mnist',
+tf.app.flags.DEFINE_string('train_dir', './logs',
                            """Directory where to write event logs """
                            """and checkpoint.""")
 FLAGS = tf.app.flags.FLAGS
@@ -192,10 +196,17 @@ def make_img_overlay(img, predicted_img):
 
 
 def main(argv=None):  # pylint: disable=unused-argument
+    # Get training data
+    data_dir = '../dataset/'
+    train_data_filename = os.path.join(data_dir, 'train_input/')
+    train_labels_filename = os.path.join(data_dir, 'train_output/')
 
-    data_dir = 'training/'
-    train_data_filename = data_dir + 'images/'
-    train_labels_filename = data_dir + 'groundtruth/'
+    # Get testing data
+    test_data_filename = os.path.join(data_dir, 'test_input/')
+    test_data_filename = sorted([os.path.join(test_data_filename, _) for _ in os.listdir(test_data_filename)])
+    assert os.path.isfile(test_data_filename[0]) == True
+    test_data_ids = [int(re.search(r"\d+", path).group(0)) for path in test_data_filename]
+    # ipdb.set_trace()
 
     # Extract it into numpy arrays.
     train_data = extract_data(train_data_filename, TRAINING_SIZE)
@@ -211,6 +222,8 @@ def main(argv=None):  # pylint: disable=unused-argument
         else:
             c1 = c1 + 1
     print('Number of data points per class: c0 = ' + str(c0) + ' c1 = ' + str(c1))
+
+    # ipdb.set_trace()
 
     print('Balancing training data...')
     min_c = min(c0, c1)
@@ -294,6 +307,7 @@ def main(argv=None):  # pylint: disable=unused-argument
     # Get prediction for given input image
     def get_prediction(img):
         data = numpy.asarray(img_crop(img, IMG_PATCH_SIZE, IMG_PATCH_SIZE))
+        # ipdb.set_trace()
         data_node = tf.constant(data)
         output = tf.nn.softmax(model(data_node))
         output_prediction = s.run(output)
@@ -380,23 +394,25 @@ def main(argv=None):  # pylint: disable=unused-argument
         if train == True:
             summary_id = '_0'
             s_data = get_image_summary(data)
-            filter_summary0 = tf.image_summary('summary_data' + summary_id, s_data)
+            filter_summary0 = tf.summary.image('summary_data' + summary_id, s_data)
             s_conv = get_image_summary(conv)
-            filter_summary2 = tf.image_summary('summary_conv' + summary_id, s_conv)
+            filter_summary2 = tf.summary.image('summary_conv' + summary_id, s_conv)
             s_pool = get_image_summary(pool)
-            filter_summary3 = tf.image_summary('summary_pool' + summary_id, s_pool)
+            filter_summary3 = tf.summary.image('summary_pool' + summary_id, s_pool)
             s_conv2 = get_image_summary(conv2)
-            filter_summary4 = tf.image_summary('summary_conv2' + summary_id, s_conv2)
+            filter_summary4 = tf.summary.image('summary_conv2' + summary_id, s_conv2)
             s_pool2 = get_image_summary(pool2)
-            filter_summary5 = tf.image_summary('summary_pool2' + summary_id, s_pool2)
+            filter_summary5 = tf.summary.image('summary_pool2' + summary_id, s_pool2)
 
         return out
 
     # Training computation: logits + cross-entropy loss.
     logits = model(train_data_node, True)  # BATCH_SIZE*NUM_LABELS
     # print 'logits = ' + str(logits.get_shape()) + ' train_labels_node = ' + str(train_labels_node.get_shape())
-    loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
-        logits, train_labels_node))
+    loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
+                logits=logits,
+                labels=train_labels_node,
+                axis=1))
     tf.summary.scalar('loss', loss)
 
     all_params_node = [conv1_weights, conv1_biases, conv2_weights, conv2_biases, fc1_weights, fc1_biases, fc2_weights,
@@ -424,7 +440,7 @@ def main(argv=None):  # pylint: disable=unused-argument
         0.01,  # Base learning rate.
         batch * BATCH_SIZE,  # Current index into the dataset.
         train_size,  # Decay step.
-        0.95,  # Decay rate.
+        0.89,  # Decay rate.
         staircase=True)
     tf.summary.scalar('learning_rate', learning_rate)
 
@@ -443,7 +459,6 @@ def main(argv=None):  # pylint: disable=unused-argument
 
     # Create a local session to run this computation.
     with tf.Session() as s:
-
         if RESTORE_MODEL:
             # Restore variables from disk.
             saver.restore(s, FLAGS.train_dir + "/model.ckpt")
@@ -454,7 +469,7 @@ def main(argv=None):  # pylint: disable=unused-argument
             tf.initialize_all_variables().run()
 
             # Build the summary operation based on the TF collection of Summaries.
-            summary_op = tf.merge_all_summaries()
+            summary_op = tf.summary.merge_all()
             summary_writer = tf.summary.FileWriter(FLAGS.train_dir, graph_def=s.graph_def)
             print('Initialized!')
             # Loop through training steps.
@@ -463,12 +478,11 @@ def main(argv=None):  # pylint: disable=unused-argument
             training_indices = range(train_size)
 
             for iepoch in range(num_epochs):
-
                 # Permute training indices
                 perm_indices = numpy.random.permutation(training_indices)
-
+                # Training loop
                 for step in range(int(train_size / BATCH_SIZE)):
-
+                    # Get the mini-batch
                     offset = (step * BATCH_SIZE) % (train_size - BATCH_SIZE)
                     batch_indices = perm_indices[offset:(offset + BATCH_SIZE)]
 
@@ -492,7 +506,7 @@ def main(argv=None):  # pylint: disable=unused-argument
 
                         # print_predictions(predictions, batch_labels)
 
-                        print('Epoch %.2f' % (float(step) * BATCH_SIZE / train_size))
+                        print('Epoch %.2f' % (float(step) * BATCH_SIZE / train_size + iepoch))
                         print('Minibatch loss: %.3f, learning rate: %.6f' % (l, lr))
                         print('Minibatch error: %.1f%%' % error_rate(predictions,
                                                                      batch_labels))
@@ -518,6 +532,44 @@ def main(argv=None):  # pylint: disable=unused-argument
             oimg = get_prediction_with_overlay(train_data_filename, i)
             oimg.save(prediction_training_dir + "overlay_" + str(i) + ".png")
 
+        # ToDo: try to visualize testing images
+
+        # ipdb.set_trace()
+        output_path = "./submission.csv"
+        outcsv = open(output_path, 'w')
+        writer = csv.writer(outcsv)
+        writer.writerow(["id", "prediction"])
+        # Do prediction on testing set directly
+        for idx, (im_path, id) in enumerate(zip(test_data_filename, test_data_ids)):
+            # Read the image
+            img = mpimg.imread(im_path)
+            img_number = id
+
+            print(idx)
+            # [patch_num, 16, 16, 3]
+            patches = numpy.asarray(img_crop(img, IMG_PATCH_SIZE, IMG_PATCH_SIZE))
+            input_data = tf.constant(patches)
+            output = tf.nn.softmax((model(input_data)))
+            labels = s.run(output)
+            # [patch_num, 1]
+
+            index=0
+            # Iterate throught all the patches
+            for j in range(0, img.shape[1], IMG_PATCH_SIZE):
+                for i in range(0, img.shape[0], IMG_PATCH_SIZE):
+                    # Get the corresponding label
+                    # ipdb.set_trace()
+                    label = labels[index, :]
+
+                    # ipdb.set_trace()
+                    if label[0] > 0.5:
+                        output_label = 1
+                    else:
+                        output_label = 0
+
+                    outcsv.writelines("{:03d}_{}_{},{}\n".format(img_number, j, i, output_label))
+                    index += 1
+        outcsv.close()
 
 if __name__ == '__main__':
-    tf.app.run()
+    main()

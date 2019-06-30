@@ -22,10 +22,10 @@ os.environ["CUDA_VISIBLE_DEVICES"]= str(gpunumber)
 flags = tf.app.flags
 
 # Loading path
-flags.DEFINE_boolean('use_external', False, 'using external dataset')
-flags.DEFINE_string('data_path', 'dataset/', 'directory of dataset')
+flags.DEFINE_boolean('use_external', True, 'using external dataset')
+flags.DEFINE_string('data_path', 'external/', 'directory of dataset')
 flags.DEFINE_string('feature', 'xception/', 'directory feature extractor')
-flags.DEFINE_string('tf_initial_checkpoint', 'xception/model.ckpt',
+flags.DEFINE_string('tf_initial_checkpoint', 'xception/model71.ckpt',
                     'The initial checkpoint in tensorflow format.')
                     
 #flags.DEFINE_boolean('use_external', False, 'using external dataset')
@@ -33,13 +33,13 @@ flags.DEFINE_string('tf_initial_checkpoint', 'xception/model.ckpt',
 #flags.DEFINE_string('feature', 'resnet_v1_50/', 'directory feature extractor')
 
 flags.DEFINE_boolean('finetune', False, 'using external dataset')
-flags.DEFINE_string('encoder_model', 'pretrained/encoder.ckpt-67500', 'directory of encoder model')
-flags.DEFINE_string('decoder_model', 'pretrained/decoder.ckpt-67500', 'directory of decoder model')
+flags.DEFINE_string('encoder_model', 'pretrained/encoder.ckpt-10000', 'directory of encoder model')
+flags.DEFINE_string('decoder_model', 'pretrained/decoder.ckpt-10000', 'directory of decoder model')
 
 # Saving directory
 flags.DEFINE_string('save_path', '/mnt/sda/ganpizza/runs', 'saving directotry')
 flags.DEFINE_boolean('save_soft_masks', False, 'Saving test results')
-flags.DEFINE_boolean('save_csv_file', True, 'Saving submission file')
+flags.DEFINE_boolean('save_csv_file', False, 'Saving submission file')
 
 # Training parameters
 flags.DEFINE_integer('batch_size', 2, 'Batch size.')
@@ -50,7 +50,7 @@ flags.DEFINE_float('alpha', 0.7, 'balance param')
 
 # Deeplab param
 
-flags.DEFINE_multi_integer('train_crop_size', [400, 400],
+flags.DEFINE_multi_integer('train_crop_size', None,
                            'Image crop size [height, width] during training.')
 
 flags.DEFINE_multi_integer('atrous_rates',  [6, 12, 18],
@@ -192,37 +192,6 @@ def buildTestDataset ( data_path, batch_size = 16, buffer = 30):
 
     return dataset
 
-def buildValidDataset( data_path, batch_size = 16, buffer = 30):
-
-    def _load_image_label(image_path, label_path):
-        image = tf.io.read_file(image_path)
-        image = tf.io.decode_png(image)
-        label = tf.io.read_file(label_path)
-        label = tf.io.decode_png(label)
-        label = label / 255
-        label = tf.math.round(label)
-
-        #label = tf.div(tf.io.decode_png(label), 255 )
-        label = tf.cast(label,tf.uint8)
-
-        return image, label
-
-    all_valid_image = os.listdir(data_path + 'valid_input/')
-    all_valid_label = os.listdir(data_path + 'valid_output/')
-
-    all_valid_image_paths = sorted([ data_path + 'valid_input/' + str(path) for path in all_valid_image])
-    all_valid_label_paths = sorted([ data_path + 'valid_output/' + str(path) for path in all_valid_label])
-
-    dataset = tf.data.Dataset.from_tensor_slices((all_valid_image_paths, all_valid_label_paths))
-
-    dataset = dataset.map(_load_image_label).prefetch(buffer)
-
-    dataset = dataset.batch(batch_size)
-
-    return dataset
-
-
-
 
 def buildTrainDataset( data_path, batch_size = 16, shuffle = True, crop_size = [None, None], augment = False, buffer = 30):
 
@@ -301,7 +270,7 @@ def create_submission_files(test_predictions, test_ids, output_path, count):
 
     def patch_to_label(patch):
         # percentage of pixels > 1 required to assign a foreground label to a patch
-        foreground_threshold = 0.25
+        foreground_threshold = 0.5
         df = np.mean(patch)
         if df > foreground_threshold:
             return 1
@@ -323,20 +292,9 @@ def create_submission_files(test_predictions, test_ids, output_path, count):
                         label = patch_to_label(patch)
                         outcsv.writelines("{:03d}_{}_{},{}\n".format(img_number, j, i, label))
 
-
 def create_soft_label_mask(soft_masks, output_path, count):
 
     file_path = os.path.join(output_path, 'softLabels_'+str(count)+'.pkl' )
-
-    print(len(soft_masks))
-    print(soft_masks[0].shape)
-
-    with open(file_path, 'wb') as f:
-        pickle.dump(soft_masks, f)
-
-
-def create_valid_soft_label(soft_masks, output_path, count):
-    file_path = os.path.join(output_path, 'valid_softLabels_'+str(count)+'.pkl' )
 
     print(len(soft_masks))
     print(soft_masks[0].shape)
@@ -380,13 +338,12 @@ def main(_):
 
         feature_3, train_endpoint = model.extract_features(input_placeholder, model_options1, is_training=True)
 
-        feature_1 = train_endpoint['feature_extractor/xception_65/entry_flow/block2/unit_1/xception_module/'
+        feature_1 = train_endpoint['feature_extractor/xception_71/entry_flow/block3/unit_1/xception_module/'
                                    'separable_conv2_pointwise']
-        feature_2 = train_endpoint['feature_extractor/xception_65/entry_flow/block3/unit_1/xception_module/'
+        feature_2 = train_endpoint['feature_extractor/xception_71/entry_flow/block4/unit_1/xception_module/'
                                    'separable_conv2_pointwise']
 
         feature_varlist = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope = 'feature_extractor')
-
 
     def Decode(feature_map_1, feature_map_2, feature, scope):
         
@@ -395,24 +352,24 @@ def main(_):
             conv_map1 = tf.keras.layers.Conv2D(filters=256, kernel_size=(1, 1), padding='same')(feature_map_1)
  
             #up_map2 = tf.keras.layers.UpSampling2D(size=(2, 2))(feature_map_2)
-            #up_map2 = tf.keras.layers.UpSampling2D(size=(2, 2), interpolation='nearest')(feature_map_2)
+            up_map2 = tf.keras.layers.UpSampling2D(size=(2, 2), interpolation='nearest')(feature_map_2)
 
-            #concat_map1 = tf.concat([conv_map1, up_map2], axis=3)
+            concat_map1 = tf.concat([conv_map1, up_map2], axis=3)
         
             #up_map3 = tf.keras.layers.UpSampling2D(size=(4, 4))(feature)
             up_map3 = tf.keras.layers.UpSampling2D(size=(4, 4), interpolation='nearest')(feature)
 
-            #conv_map2 = tf.keras.layers.Conv2D(filters=1024, kernel_size=(3, 3), padding='same')(concat_map1)
+            conv_map2 = tf.keras.layers.Conv2D(filters=1024, kernel_size=(3, 3), padding='same')(concat_map1)
             
-            concat_map2 = tf.concat([conv_map1, up_map3], axis=3)
-            conv_map2 = tf.keras.layers.Conv2D(filters=512, kernel_size=(3, 3), padding='same')(concat_map2)
-            
-            prediction = tf.keras.layers.UpSampling2D(size=(4, 4), interpolation='bilinear')(conv_map2)
-            logits = tf.keras.layers.Conv2D(2, (1, 1), kernel_initializer='he_normal', 
-                        activation='linear', padding='same', strides=(1, 1))(prediction)
+            concat_map2 = tf.concat([conv_map2, up_map3], axis=3)
+
+            conv_map3 = tf.keras.layers.Conv2D(filters=2048, kernel_size=(3, 3), padding='same')(concat_map2)
+
+            prediction = tf.keras.layers.Conv2D(2, (1, 1), kernel_initializer='he_normal', 
+                        activation='linear', padding='same', strides=(1, 1))(conv_map3)
         
             #prediction = tf.keras.layers.UpSampling2D(size=(4, 4))(conv_map3)
-            
+            logits = tf.keras.layers.UpSampling2D(size=(4, 4), interpolation='bilinear')(prediction)
         
         return logits
 
@@ -424,36 +381,32 @@ def main(_):
 
         decoder_varlist = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope = 'decoder')
 
-
     with tf.name_scope('loss'):
-
+        
         class_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits= pred_soft, labels= tf.squeeze(label_placeholder, axis=3))
         class_loss = tf.reduce_mean(class_loss)
-
+        '''
         gt_onehot = tf.one_hot(tf.squeeze(label_placeholder, axis=3), depth = 2, dtype = tf.float32)
         smooth = 1e-9
-        intersection = tf.reduce_sum(pred_soft * gt_onehot)
-        union = tf.reduce_sum(pred_soft) + tf.reduce_sum(gt_onehot)
+        intersection = tf.reduce_sum(soft_label * gt_onehot)
+        union = tf.reduce_sum(soft_label) + tf.reduce_sum(gt_onehot)
         jaccard_index = (intersection + smooth) / ( union - intersection + smooth) 
         jaccard_loss =  (1 - jaccard_index) 
+        '''
 
+        smooth = 1e-9
+        y_head = tf.slice(soft_label, [0, 0, 0, 1], [-1, -1, -1,-1])  
 
-        #y_head = tf.slice(pred_soft, [0, 0, 0, 1], [-1, -1, -1,-1])  
+        yy_head = tf.reduce_sum(tf.multiply(y_head, tf.cast(label_placeholder, tf.float32)))
 
-        #yy_head = tf.reduce_sum(tf.multiply(y_head, tf.cast(label_placeholder, tf.float32)))
-
-        #jaccard_index = 2 * yy_head / ( tf.reduce_sum(tf.cast(label_placeholder, tf.float32)) + tf.reduce_sum(y_head) + 1.0) 
-        #jaccard_loss = - jaccard_index
-
-        #jaccard_index = (yy_head + 1e-9) / ( tf.reduce_sum(tf.cast(label_placeholder, tf.float32)) + tf.reduce_sum(y_head) - yy_head + 1e-9) 
-        #jaccard_loss = - tf.log(jaccard_index)
+        jaccard_index = (yy_head + smooth) / ( tf.reduce_sum(tf.cast(label_placeholder, tf.float32)) + tf.reduce_sum(y_head) - yy_head + smooth) 
+        jaccard_loss = (1 - jaccard_index) 
 
 
         total_loss = FLAGS.alpha * class_loss + ( 1.0 - FLAGS.alpha) * jaccard_loss
         tf.summary.scalar('class_loss', class_loss) 
         tf.summary.scalar('jaccard_loss', jaccard_loss) 
         tf.summary.scalar('total_loss', total_loss) 
-
 
     with tf.name_scope('input_image'):
         tf.summary.image('input', tf.cast(input_placeholder, tf.uint8))
@@ -511,9 +464,6 @@ def main(_):
                                         augment = True)
             test_data =  buildTestDataset( FLAGS.data_path, batch_size = FLAGS.batch_size)
 
-            valid_data = buildValidDataset( FLAGS.data_path, batch_size = FLAGS.batch_size)
-
-
 
         with tf.name_scope('dataset_iterator'):
             it = tf.data.Iterator.from_structure(train_data.output_types, train_data.output_shapes)
@@ -523,14 +473,6 @@ def main(_):
             test_iterator = tf.data.Iterator.from_structure(test_data.output_types, test_data.output_shapes)
             next_test = test_iterator.get_next()
             init_test = test_iterator.make_initializer(test_data)
-
-            if not FLAGS.use_external:
-
-                valid_iterator = tf.data.Iterator.from_structure(valid_data.output_types, valid_data.output_shapes)
-                next_valid = valid_iterator.get_next()
-                init_valid = valid_iterator.make_initializer(valid_data)
-
-
 
     config=tf.ConfigProto(allow_soft_placement=True, log_device_placement=False)
     config.gpu_options.allow_growth = True
@@ -566,7 +508,6 @@ def main(_):
             test_ids = []
             soft_labels = []
             sess.run(init_test)
-            
             rr = 0
             rn = 0
             nr = 0
@@ -596,6 +537,11 @@ def main(_):
             except tf.errors.OutOfRangeError:
                 print('[INFO] Test Done.')
 
+            if (FLAGS.use_external):
+                mIoU = ( 0.5 * rr / (rr + rn + nr) ) + ( 0.5 * nn / (nn + rn + nr) )
+                print('[INFO] Validation mIoU')
+                print (mIoU)
+
             if (FLAGS.save_csv_file):
                 print('[INFO] Write to csv file')
                 create_submission_files(test_predictions, test_ids, save_output_path, step)
@@ -603,36 +549,7 @@ def main(_):
                 print('[INFO] Generating soft label masks')
                 create_soft_label_mask(soft_labels, save_output_path, step)
 
-            if (FLAGS.use_external):
-                mIoU = ( 0.5 * rr / (rr + rn + nr) ) + ( 0.5 * nn / (nn + rn + nr) )
-                print('[INFO] Validation mIoU')
-                print (mIoU)
-            else :
-                sess.run(init_valid)
-                valid_soft_labels = []
-
-                try:
-                    while True:
-                        valid_image, valid_labels = sess.run(next_valid)
-                        valid_predict, valid_soft = sess.run( [pred_hard, soft_label], feed_dict={input_placeholder : valid_image})
-                        rr += np.sum((valid_predict == 1) * (valid_labels == 1))
-                        rn += np.sum((valid_predict == 1) * (valid_labels == 0))
-                        nr += np.sum((valid_predict == 0) * (valid_labels == 1))
-                        nn += np.sum((valid_predict == 0) * (valid_labels == 0))
-                        valid_soft_labels.extend(valid_soft)
-
-                except tf.errors.OutOfRangeError:
-                    print('[INFO] Valid Done.')
-                
-                mIoU = ( 0.5 * rr / (rr + rn + nr) ) + ( 0.5 * nn / (nn + rn + nr) )
-                print('[INFO] Validation mIoU')
-                print (mIoU)
-                if (FLAGS.save_soft_masks):
-                    create_valid_soft_label(valid_soft_labels, save_output_path, step)
-
-
         #Training loop
-        
         images, labels = sess.run(next_data)
         
         summary, _ , _ =  sess.run([merged, feature_opt, decoder_opt],
@@ -651,7 +568,6 @@ def main(_):
         if (step) % 2500 == 0 and not step == 0 :
             feature_saver.save(sess, os.path.join(save_model_path, 'encoder.ckpt'), global_step = step)
             decoder_saver.save(sess, os.path.join(save_model_path, 'decoder.ckpt'), global_step = step)
-
 
 
 if __name__ == '__main__':
