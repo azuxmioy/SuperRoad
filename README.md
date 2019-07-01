@@ -45,3 +45,11 @@ Look at `example_method.py` and `example_main.py`.
 `csv2img.py`: Helps to visualize output by reading CSV created
 
 `method.py`: Abstract class for methods. All methods should inherit from abstract class `method.py`.
+
+## Some ToDo
+* Fix focal loss
+* Add random scaling and color jitter to training
+* add smoothness loss
+* Testing different combinations
+* add crf refinement
+* multi-scale aggregation

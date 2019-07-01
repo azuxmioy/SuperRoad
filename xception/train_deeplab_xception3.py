@@ -14,7 +14,9 @@ from deeplab import common
 from deeplab import model
 from deeplab.utils import train_utils
 from tensorflow.keras import backend as K
+import cv2
 
+import ipdb
 
 gpunumber = 0
 os.environ["CUDA_VISIBLE_DEVICES"]= str(gpunumber)
@@ -323,6 +325,7 @@ def create_submission_files(test_predictions, test_ids, output_path, count):
                         label = patch_to_label(patch)
                         outcsv.writelines("{:03d}_{}_{},{}\n".format(img_number, j, i, label))
 
+
 def create_soft_label_mask(soft_masks, output_path, count):
 
     file_path = os.path.join(output_path, 'softLabels_'+str(count)+'.pkl' )
@@ -355,8 +358,8 @@ def _variable_summaries(var):
         tf.summary.scalar('min', tf.reduce_min(var))
         tf.summary.histogram('histogram', var)
 
-def main(_):
 
+def main():
     model_options1 = common.ModelOptions(
                     outputs_to_num_classes=2,
                     crop_size=None,

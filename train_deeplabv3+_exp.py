@@ -14,6 +14,9 @@ from deeplab import common
 from deeplab import model
 from deeplab.utils import train_utils
 from tensorflow.keras import backend as K
+import cv2
+from PIL import Image
+from scipy import ndimage
 
 import ipdb
 
@@ -49,7 +52,10 @@ flags.DEFINE_integer('batch_size', 2, 'Batch size.')
 flags.DEFINE_integer('max_steps', 80000, 'Number of steps to run training.')
 flags.DEFINE_float('f_lr', 3e-6, 'learning rate')
 flags.DEFINE_float('d_lr', 3e-6, 'learning rate')
-flags.DEFINE_float('alpha', 0.7, 'balance param')
+flags.DEFINE_float('weight_jac', 0.1, 'balance param')
+flags.DEFINE_float('weight_tv', 0.0000001, 'balance param tv')
+flags.DEFINE_string('loss', 'class', "choice between cross-entropy and focal loss.")
+flags.DEFINE_float('scale_factor', 2.0, "random scaling factor.")
 
 # Deeplab param
 
@@ -69,6 +75,8 @@ flags.DEFINE_boolean('last_layers_contain_logits_only', False,
 flags.DEFINE_boolean('initialize_last_layer', True,
                      'Initialize the last layer.')
 
+# Define the mode between train/val or final
+flags.DEFINE_string("cil_mode", "final", "modes between trainval and final")
 
 FLAGS = flags.FLAGS
 
@@ -77,10 +85,15 @@ save_model_path = None
 save_output_path = None
 
 
-def buildExternalDataset (data_path, batch_size = 16, shuffle = True, crop_size = [512, 512], augment = False, buffer = 30):
+def buildExternalDataset (data_path,
+                          batch_size=16,
+                          shuffle=True,
+                          crop_size=[512, 512],
+                          augment=False,
+                          scale_factor=None,
+                          buffer = 30):
     
     def _random_crop(image, label, size):
-
         combined = tf.concat([image, label], axis=2)
         last_label_dim = tf.shape(label)[-1]
         last_image_dim = tf.shape(image)[-1]
@@ -91,6 +104,20 @@ def buildExternalDataset (data_path, batch_size = 16, shuffle = True, crop_size 
     def _random_crop_new(image, label, size):
         h, w, _ = image.shape
 
+        # Perform random scaling
+        if scale_factor is not None:
+            # decide the random scaling factor
+            random_scale = np.random.uniform(1., scale_factor)
+
+            # Perform scaling
+            h_new = int(h * random_scale)
+            w_new = int(w * random_scale)
+
+            image = cv2.resize(image, (h_new, w_new), cv2.INTER_LINEAR)
+            label = cv2.resize(label, (h_new, w_new), cv2.INTER_NEAREST)[..., None]
+
+        h, w, _ = image.shape
+
         # Define cropping range
         h_start = 0
         w_start = 0
@@ -98,8 +125,8 @@ def buildExternalDataset (data_path, batch_size = 16, shuffle = True, crop_size 
         w_end = w - size[0]
 
         # keep cropping
-        max_iter=1000
-        min_ratio = 0.08
+        max_iter=4000
+        min_ratio = 0.06
 
         iter = 0
         while iter < max_iter:
@@ -261,7 +288,12 @@ def buildValidDataset( data_path, batch_size = 16, buffer = 30):
     return dataset
 
 
-def buildTrainDataset( data_path, batch_size = 16, shuffle = True, crop_size = [None, None], augment = False, buffer=30):
+def buildTrainDataset(data_path, batch_size=16, shuffle=True,
+                      crop_size=[400, 400],
+                      augment=False,
+                      buffer=30,
+                      scale_factor=None,
+                      mode="train_val"):
     def _load_image_label(image_path, label_path):
         image = tf.io.read_file(image_path)
         image = tf.io.decode_png(image)
@@ -275,9 +307,46 @@ def buildTrainDataset( data_path, batch_size = 16, shuffle = True, crop_size = [
 
         return image, label
 
+    def _random_crop_new(image, label, size):
+        h, w, _ = image.shape
+
+        # Perform random scaling
+        if scale_factor is not None:
+            # decide the random scaling factor
+            random_scale = np.random.uniform(1., scale_factor)
+
+            # Perform scaling
+            h_new = int(h * random_scale)
+            w_new = int(w * random_scale)
+
+            image = cv2.resize(image, (h_new, w_new), cv2.INTER_LINEAR)
+            label = cv2.resize(label, (h_new, w_new), cv2.INTER_NEAREST)[..., None]
+
+        h, w, _ = image.shape
+
+        # Define cropping range
+        h_start = 0
+        w_start = 0
+        h_end = max(h - size[0], 0)
+        w_end = max(w - size[0], 0)
+
+        # keep cropping
+        max_iter=4000
+        min_ratio = 0.06
+
+        if (h_end > 0) and (w_end > 0):
+            h_crop = np.random.randint(h_start, h_end)
+            w_crop = np.random.randint(w_start, w_end)
+        else:
+            h_crop = 0
+            w_crop = 0
+
+        cropped_image = image[h_crop:h_crop+size[0], w_crop:w_crop+size[1], :]
+        cropped_label = label[h_crop:h_crop+size[0], w_crop:w_crop+size[1], :]
+
+        return cropped_image, cropped_label
 
     def _random_crop(image, label, size):
-
         combined = tf.concat([image, label], axis=2)
         last_label_dim = tf.shape(label)[-1]
         last_image_dim = tf.shape(image)[-1]
@@ -304,13 +373,31 @@ def buildTrainDataset( data_path, batch_size = 16, shuffle = True, crop_size = [
 
         return combined_rot[:, :, :last_image_dim], combined_rot[:, :, last_image_dim:]
 
-    all_trian_image = os.listdir(data_path + 'train_input/')
-    all_train_label = os.listdir(data_path + 'train_output/')
+    # Get all train input file names
+    train_image_path = os.path.join(data_path, 'train_input/')
+    train_label_path = os.path.join(data_path, 'train_output/')
+    all_trian_image = os.listdir(train_image_path)
+    all_train_label = os.listdir(train_label_path)
+
+    # Get all val input file names
+    val_image_path = os.path.join(data_path, "val_input/")
+    val_label_path = os.path.join(data_path, "val_output/")
+    all_val_image = os.listdir(val_image_path)
+    all_val_label = os.listdir(val_label_path)
+
+    # Use different training set in different mode
+    assert mode in ["train_val", "final"]
+    if mode == "train_val":
+        all_trian_image = list(set(all_trian_image) - set(all_val_image))
+        all_train_label = list(set(all_train_label) - set(all_val_label))
 
     # ipdb.set_trace()
+    all_trian_image_paths = sorted([train_image_path + str(path) for path in all_trian_image])
+    all_trian_label_paths = sorted([train_label_path + str(path) for path in all_train_label])
+    assert len(all_trian_image_paths) > 0
+    assert len(all_trian_label_paths) > 0
 
-    all_trian_image_paths = sorted([ data_path + 'train_input/' + str(path) for path in all_trian_image])
-    all_trian_label_paths = sorted([ data_path + 'train_output/' + str(path) for path in all_train_label])
+    # ipdb.set_trace()
 
     dataset = tf.data.Dataset.from_tensor_slices((all_trian_image_paths, all_trian_label_paths)).repeat()
 
@@ -319,16 +406,17 @@ def buildTrainDataset( data_path, batch_size = 16, shuffle = True, crop_size = [
     if shuffle:
         dataset = dataset.shuffle(1000)
 
+    # ipdb.set_trace()
     if crop_size[0] is not None:
         dataset = dataset.map(lambda image, label: 
-                        tuple( tf.py_function( _random_crop, [image, label, crop_size],
-                        [tf.uint8, tf.uint8] )))
+                        tuple(tf.py_func(_random_crop_new, [image, label, crop_size],
+                        [tf.uint8, tf.uint8])))
 
     if augment:
         dataset = dataset.map(lambda image, label:
-                    tuple( tf.py_function( _flip, [image, label], [tf.uint8, tf.uint8] )))
+                    tuple(tf.py_function(_flip, [image, label], [tf.uint8, tf.uint8])))
         dataset = dataset.map(lambda image, label:
-                    tuple( tf.py_function( _rotate, [image, label], [tf.uint8, tf.uint8] )))
+                    tuple(tf.py_function(_rotate, [image, label], [tf.uint8, tf.uint8])))
 
     dataset = dataset.batch(batch_size)
 
@@ -365,6 +453,17 @@ def create_submission_files(test_predictions, test_ids, output_path, count):
 def create_soft_label_mask(soft_masks, output_path, count):
 
     file_path = os.path.join(output_path, 'softLabels_'+str(count)+'.pkl' )
+
+    print(len(soft_masks))
+    print(soft_masks[0].shape)
+
+    with open(file_path, 'wb') as f:
+        pickle.dump(soft_masks, f)
+
+
+def create_soft_label_mask_ag(soft_masks, output_path, count):
+
+    file_path = os.path.join(output_path, 'softLabels_ag_'+str(count)+'.pkl' )
 
     print(len(soft_masks))
     print(soft_masks[0].shape)
@@ -470,11 +569,19 @@ def main():
 
         # Focal-loss
         with tf.name_scope("focal_loss"):
-            gamma = 2
-            eps = 1e-6
+            gamma = 0.5
+            eps = 1e-7
             onehot_label = tf.one_hot(tf.squeeze(label_placeholder), depth=2, axis=-1)
             pred_softmax = tf.clip_by_value(tf.nn.softmax(pred_soft, axis=3), eps, 1-eps)
-            focal_loss = tf.reduce_mean(-1 * onehot_label * tf.log(pred_softmax) * (1 - pred_softmax) ** gamma)
+            focal_loss = -1 * onehot_label * tf.log(pred_softmax)
+            focal_loss = tf.reduce_mean(focal_loss * ((1 - pred_softmax) ** gamma))
+
+        # Weighted cross-entropy loss
+        with tf.name_scope("weighted_class_loss"):
+            label = tf.one_hot(tf.squeeze(label_placeholder), depth=2, axis=-1)
+            wclass_loss = tf.nn.weighted_cross_entropy_with_logits(logits=pred_soft, targets=label,
+                                                                   pos_weight=1.1)
+            wclass_loss = tf.reduce_mean(wclass_loss)
 
         # Smoothness loss
         # with tf.name_scope("smoothness_loss"):
@@ -486,6 +593,7 @@ def main():
         jaccard_index = (intersection + smooth) / ( union - intersection + smooth) 
         jaccard_loss =  (1 - jaccard_index) 
         '''
+        # Define the jacard loss
         with tf.name_scope("jacard_loss"):
             smooth = 1e-9
             y_head = tf.slice(soft_label, [0, 0, 0, 1], [-1, -1, -1,-1])
@@ -495,13 +603,23 @@ def main():
             jaccard_index = (yy_head + smooth) / ( tf.reduce_sum(tf.cast(label_placeholder, tf.float32)) + tf.reduce_sum(y_head) - yy_head + smooth)
             jaccard_loss = (1 - jaccard_index)
 
+        # Define the total variation loss
+        with tf.name_scope("tv_loss"):
+            tv_loss = tf.reduce_mean(tf.image.total_variation(soft_label))
 
-        # total_loss = FLAGS.alpha * class_loss + ( 1.0 - FLAGS.alpha) * jaccard_loss
-        total_loss = FLAGS.alpha * focal_loss + ( 1.0 - FLAGS.alpha) * jaccard_loss
+        if FLAGS.loss == "focal":
+            total_loss = 1.0 * focal_loss + FLAGS.weight_jac * jaccard_loss + FLAGS.weight_tv * tv_loss
+            tf.summary.scalar('class_loss', focal_loss)
 
-        tf.summary.scalar('class_loss', focal_loss)
-        # tf.summary.scalar('class_loss', class_loss)
-        tf.summary.scalar('jaccard_loss', jaccard_loss) 
+        elif FLAGS.loss == "wclass":
+            total_loss = 1.0 * wclass_loss + FLAGS.weight_jac * jaccard_loss + FLAGS.weight_tv * tv_loss
+            tf.summary.scalar('class_loss', wclass_loss)
+        else:
+            total_loss = 1.0 * class_loss + FLAGS.weight_jac * jaccard_loss + FLAGS.weight_tv * tv_loss
+            tf.summary.scalar('class_loss', class_loss)
+
+        tf.summary.scalar('jaccard_loss', jaccard_loss)
+        tf.summary.scalar('tv_loss', tv_loss)
         tf.summary.scalar('total_loss', total_loss) 
 
     with tf.name_scope('input_image'):
@@ -539,8 +657,25 @@ def main():
                         ignore_missing_vars=True)
 
     with tf.name_scope('optimizer'):
-        feature_opt = tf.train.AdamOptimizer(FLAGS.f_lr).minimize(total_loss, var_list = feature_varlist)
-        decoder_opt = tf.train.AdamOptimizer(FLAGS.d_lr).minimize(total_loss, var_list = decoder_varlist)
+        global_step = tf.train.get_or_create_global_step()
+        if FLAGS.use_external == True:
+            decay_steps = FLAGS.max_steps
+        else:
+            decay_steps = 10000
+
+        f_lr = tf.train.polynomial_decay(FLAGS.f_lr, global_step,
+                                         decay_steps=decay_steps,
+                                         end_learning_rate=FLAGS.f_lr * 0.01)
+        d_lr = tf.train.polynomial_decay(FLAGS.d_lr, global_step,
+                                         decay_steps=decay_steps,
+                                         end_learning_rate=FLAGS.f_lr * 0.01)
+        feature_opt = tf.train.AdamOptimizer(f_lr).minimize(total_loss, var_list = feature_varlist,
+                                                            global_step=global_step)
+        decoder_opt = tf.train.AdamOptimizer(d_lr).minimize(total_loss, var_list = decoder_varlist)
+
+    with tf.name_scope("lr_summary"):
+        tf.summary.scalar("f_lr", f_lr, family="lr")
+        tf.summary.scalar("d_lr", d_lr, family="lr")
 
     init_var = tf.global_variables_initializer()
 
@@ -548,24 +683,31 @@ def main():
         feature_saver = tf.train.Saver(feature_varlist, max_to_keep=10)
         decoder_saver = tf.train.Saver(decoder_varlist, max_to_keep=10)
 
+    # ipdb.set_trace()
     with tf.name_scope('dataset'):
         # ipdb.set_trace()
         if (FLAGS.use_external):
             data_path = os.path.join(FLAGS.data_path, "external/")
             train_data, test_data = buildExternalDataset(data_path, batch_size = FLAGS.batch_size,
                                         shuffle=True, crop_size=[400, 400],
-                                        augment=True, buffer=100)
+                                        augment=True, buffer=100, scale_factor=FLAGS.scale_factor)
 
             # ToDo [julin] use cil dataset as validation set
             # Actually, we use the cil dataset as the validation dataset in external mode
             valid_data = buildValidDataset(FLAGS.data_path, batch_size=FLAGS.batch_size)
         else:
-            train_data = buildTrainDataset( FLAGS.data_path, batch_size = FLAGS.batch_size,
-                                        shuffle = True, crop_size = [400, 400],
-                                        augment = True)
-            test_data =  buildTestDataset( FLAGS.data_path, batch_size = FLAGS.batch_size)
+            train_data = buildTrainDataset(FLAGS.data_path,
+                                           batch_size = FLAGS.batch_size,
+                                           shuffle=True,
+                                           crop_size=[400, 400],
+                                           augment=True,
+                                           scale_factor=FLAGS.scale_factor,
+                                           mode=FLAGS.cil_mode)
+            test_data = buildTestDataset(FLAGS.data_path,
+                                         batch_size=FLAGS.batch_size)
 
-            valid_data = buildValidDataset( FLAGS.data_path, batch_size = FLAGS.batch_size)
+            valid_data = buildValidDataset(FLAGS.data_path,
+                                           batch_size=FLAGS.batch_size)
 
 
 
@@ -605,9 +747,15 @@ def main():
 
     start_time = time.time()
 
+    if FLAGS.use_external == True:
+        testing_interval = 1000
+    else:
+        testing_interval = 200
+
+    # ipdb.set_trace()
     for step in range(FLAGS.max_steps):
         # Perform testing
-        if (step) % 1000 == 0:
+        if (step) % testing_interval == 0:
             print('Testing.....')
 
             test_images = []
@@ -615,14 +763,60 @@ def main():
             test_ids = []
             soft_labels = []
             sess.run(init_test)
+
+            test_predictions_ag = []
+            soft_labels_ag =[]
             
             rr = 0
             rn = 0
             nr = 0
             nn = 0
 
+            # Do multi-scale aggregation
+            scales = [1.0, 1.5, 2.0]
+
+            def multi_scale_aggregation(input_images):
+                batch_size, h, w, _ = input_images.shape
+                valid_soft_lst = []
+                valid_predict_lst = []
+                for i in range(batch_size):
+                    image = input_images[i, :, :, :]
+
+                    soft_labels = []
+                    for scale in scales:
+                        h_new = int(h * scale)
+                        w_new = int(w * scale)
+                        image_scaled = cv2.resize(image, (h_new, w_new), interpolation=cv2.INTER_LINEAR)
+                        image_scaled = Image.fromarray(image_scaled)
+                        for idx in range(1):
+                            image_rot = np.array(image_scaled.rotate(idx * 90))[None, ...]
+                            predict, soft = sess.run([pred_hard, soft_label],
+                                                     feed_dict={input_placeholder: image_rot})
+                            # predict = np.array((Image.fromarray(predict[0, :, :, :])).rotate(-idx*90))
+                            # soft = np.array((Image.fromarray(soft[0, :, :, :])).rotate(-idx*90))
+                            predict = ndimage.rotate(predict[0, :, :, :], -idx * 90)
+                            soft = ndimage.rotate(soft[0, :, :, :], -idx * 90)
+
+                            soft_labels.append(cv2.resize(soft, (h, w), interpolation=cv2.INTER_NEAREST)[..., None])
+
+                    # ipdb.set_trace()
+                    # Average the predictions
+                    soft_label_final = np.concatenate(tuple(soft_labels), axis=-1)
+                    soft_label_final = np.mean(soft_label_final, axis=-1)
+                    valid_soft_lst.append(soft_label_final[None, ...])
+                    valid_predict_lst.append(np.argmax(soft_label_final, axis=-1)[None, ...])
+
+                # Concat back to batch
+                valid_soft = np.concatenate(tuple(valid_soft_lst), axis=0)
+                valid_predict = np.concatenate(tuple(valid_predict_lst), axis=0)[..., None]
+
+                return valid_soft, valid_predict
+
             try:
                 while True:
+                    ###################
+                    ## Original part ##
+                    ###################
                     if (FLAGS.use_external):
                         test_image, test_labels, ids = sess.run(next_test)
                     else:
@@ -642,6 +836,12 @@ def main():
                     soft_labels.extend(test_soft)
                     print(ids)
 
+                    ######################
+                    ## Aggregation part ##
+                    ######################
+                    test_soft2, test_predict2 = multi_scale_aggregation(test_image)
+                    soft_labels_ag.extend(test_soft2)
+
             except tf.errors.OutOfRangeError:
                 print('[INFO] Test Done.')
 
@@ -652,6 +852,7 @@ def main():
             if (FLAGS.save_soft_masks):
                 print('[INFO] Generating soft label masks')
                 create_soft_label_mask(soft_labels, save_output_path, step)
+                create_soft_label_mask_ag(soft_labels_ag, save_output_path, step)
 
             # if (FLAGS.use_external):
             #     mIoU = ( 0.5 * rr / (rr + rn + nr) ) + ( 0.5 * nn / (nn + rn + nr) )
@@ -662,6 +863,14 @@ def main():
             sess.run(init_valid)
             valid_soft_labels = []
             accuracy_lst = []
+
+            valid_soft_labels_ag = []
+            accuracy_lst_ag = []
+
+            rr_ag = 0
+            rn_ag = 0
+            nr_ag = 0
+            nn_ag = 0
 
             try:
                 while True:
@@ -678,11 +887,31 @@ def main():
                     valid_accuracy = np.mean((valid_predict == valid_labels).astype(np.int32))
                     accuracy_lst.append(valid_accuracy)
 
+                    valid_soft, valid_predict = multi_scale_aggregation(valid_image)
+                    # ipdb.set_trace()
+                    rr_ag += np.sum((valid_predict == 1) * (valid_labels == 1))
+                    rn_ag += np.sum((valid_predict == 1) * (valid_labels == 0))
+                    nr_ag += np.sum((valid_predict == 0) * (valid_labels == 1))
+                    nn_ag += np.sum((valid_predict == 0) * (valid_labels == 0))
+
+                    valid_accuracy = np.mean((valid_predict == valid_labels).astype(np.int32))
+
+                    valid_soft_labels_ag.append(valid_soft)
+                    accuracy_lst_ag.append(valid_accuracy)
+
             except tf.errors.OutOfRangeError:
                 print('[INFO] Valid Done.')
 
+            # Original
             mIoU = (0.5 * rr / (rr + rn + nr)) + (0.5 * nn / (nn + rn + nr))
             valid_accuracy = np.mean(np.array(accuracy_lst))
+
+            # Aggregated
+            mIoU_ag = (0.5 * rr_ag / (rr_ag + rn_ag + nr_ag)) + (0.5 * nn_ag / (nn_ag + rn_ag + nr_ag))
+            valid_accuracy_ag = np.mean(np.array(accuracy_lst_ag))
+
+            # ipdb.set_trace()
+
             print('[INFO] Validation Reslults')
             print("\t mIoU:", mIoU)
             print("\t Accuracy:", valid_accuracy)
@@ -694,6 +923,8 @@ def main():
             val_summary = tf.Summary()
             val_summary.value.add(tag="val_accuracy", simple_value=valid_accuracy)
             val_summary.value.add(tag="val_mIoU", simple_value=mIoU)
+            val_summary.value.add(tag="val_accuracy_ag", simple_value=valid_accuracy_ag)
+            val_summary.value.add(tag="val_mIoU_ag", simple_value=mIoU_ag)
 
             writer.add_summary(val_summary, global_step=step)
 
@@ -718,7 +949,7 @@ def main():
                                        test_mask_placeholder: test_predictions[0:10]})
         
 
-        if (step) % 2500 == 0 and not step == 0 :
+        if (step) % 1000 == 0 and not step == 0 :
             feature_saver.save(sess, os.path.join(save_model_path, 'encoder.ckpt'), global_step = step)
             decoder_saver.save(sess, os.path.join(save_model_path, 'decoder.ckpt'), global_step = step)
 
