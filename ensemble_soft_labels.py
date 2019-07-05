@@ -66,7 +66,14 @@ if __name__ == "__main__":
     ]
 
     # Parse all the labels
-    soft_label_lst = [np.array(parse_pkl(_))[None, ...] for _ in path_lst]
+    print("[Info] Loading soft labels from experiments file")
+    try:
+        soft_label_lst = [np.array(parse_pkl(_))[None, ...] for _ in path_lst]
+    except:
+        raise ValueError("Something went wrong...\n \
+        Make sure you downloaded all the required soft-labels and put them in correct paths as we mentioned in README\n\
+        Or contact the authors by sending email to julin@student.ethz.ch.")
+    print("[Info] Successfully load all the soft labels!!")
 
     # Concat along 1-st dimensions
     soft_label = np.concatenate(tuple(soft_label_lst), axis=0)
@@ -92,5 +99,5 @@ if __name__ == "__main__":
                [50, 51, 54, 61, 64, 65] + \
                [69,  7, 76, 79,  8, 80] + \
                [9, 90, 92, 93]
-    ipdb.set_trace()
-    create_submission_files(predictions, test_ids, output_path="./", count=5)
+    print("[Info] Finish ensembling. Creating submission file.")
+    create_submission_files(predictions, test_ids, output_path="./", count=0)

@@ -53,3 +53,52 @@ Look at `example_method.py` and `example_main.py`.
 * Testing different combinations
 * add crf refinement
 * multi-scale aggregation
+
+## Get Started
+In this project, we offer you several options to explore our methods:
+1. **Option1:** Use the pre-computed soft-labels. You can ideally reproduced the results on kaggle
+2. **Option2:** Use the pre-trained model. You can re-run all the inference and get soft labels from different model. Then, you can ensemble them to get the final result (The results might be slightly different from Kaggle leaderboard, but should be similar.)
+3. **Option3:** Use the provided training scripts and external data. You can step-by-step reproduce all the process from training on external => training on cil dataset => ensemble.
+
+### Option1
+Run the provided ensemble code by
+```bash
+cd $PROJECT_ROOT
+python ensemble_soft_labels.py
+``` 
+```submission_0.csv``` will be created at ```$PROJECT_ROOT```
+
+### Option2
+Run the provided testing scripts in ```$PROJECT_ROOT\scripts```<br/>
+First go to ```$PROJECT_ROOT```
+```bash
+cd $PROJECT_ROOT
+```
+1. Standard cross-entropy model:
+   ```bash
+   sh ./scripts/test_deeplabv3+_class_export.sh
+   ```
+2. Cross-entropy model trained in old data sampling method:
+   ```bash
+   sh ./scripts/test_deeplabv3+_class_old_export.sh
+   ```
+3. Cross-entropy model trained using only 90 images from cil dataset:
+   ```bash
+   sh ./scripts/test_deeplabv3+_class_90_export.sh
+   ```
+4. Focal loss model:
+   ```bash
+   sh ./scripts/test_deeplabv3+_focal_export.sh
+   ```
+5. Weighted cross-entropy model:
+   ```bash
+   sh ./scripts/test_deeplabv3+_wclass_export.sh
+   ```
+6. Weighted cross-entropy model with larger learning rate:
+   ```bash
+   sh ./scripts/test_deeplabv3+_wclass_new_export.sh
+   ```
+7. Finally, if all the previous steps are done correctly, we can ensemble them and produce the final results:
+   ```bash
+   python ensemble_soft_labels.py
+   ```

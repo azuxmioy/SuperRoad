@@ -77,6 +77,7 @@ flags.DEFINE_boolean('initialize_last_layer', True,
 
 # Define the mode between train/val or final
 flags.DEFINE_string("cil_mode", "final", "modes between trainval and final")
+flags.DEFINE_string("mode", "train", "Set code mode between train/test and pure testing")
 
 FLAGS = flags.FLAGS
 
@@ -454,8 +455,8 @@ def create_soft_label_mask(soft_masks, output_path, count):
 
     file_path = os.path.join(output_path, 'softLabels_'+str(count)+'.pkl' )
 
-    print(len(soft_masks))
-    print(soft_masks[0].shape)
+    # print(len(soft_masks))
+    # print(soft_masks[0].shape)
 
     with open(file_path, 'wb') as f:
         pickle.dump(soft_masks, f)
@@ -465,8 +466,8 @@ def create_soft_label_mask_ag(soft_masks, output_path, count):
 
     file_path = os.path.join(output_path, 'softLabels_ag_'+str(count)+'.pkl' )
 
-    print(len(soft_masks))
-    print(soft_masks[0].shape)
+    # print(len(soft_masks))
+    # print(soft_masks[0].shape)
 
     with open(file_path, 'wb') as f:
         pickle.dump(soft_masks, f)
@@ -475,8 +476,8 @@ def create_soft_label_mask_ag(soft_masks, output_path, count):
 def create_valid_soft_label(soft_masks, output_path, count):
     file_path = os.path.join(output_path, 'valid_softLabels_'+str(count)+'.pkl' )
 
-    print(len(soft_masks))
-    print(soft_masks[0].shape)
+    # print(len(soft_masks))
+    # print(soft_masks[0].shape)
 
     with open(file_path, 'wb') as f:
         pickle.dump(soft_masks, f)
@@ -752,206 +753,375 @@ def main():
     else:
         testing_interval = 200
 
-    # ipdb.set_trace()
-    for step in range(FLAGS.max_steps):
-        # Perform testing
-        if (step) % testing_interval == 0:
-            print('Testing.....')
+    if FLAGS.mode == "train":
+        # ipdb.set_trace()
+        for step in range(FLAGS.max_steps):
+            # Perform testing
+            if (step) % testing_interval == 0:
+                print('Testing.....')
 
-            test_images = []
-            test_predictions = []
-            test_ids = []
-            soft_labels = []
-            sess.run(init_test)
+                test_images = []
+                test_predictions = []
+                test_ids = []
+                soft_labels = []
+                sess.run(init_test)
 
-            test_predictions_ag = []
-            soft_labels_ag =[]
-            
-            rr = 0
-            rn = 0
-            nr = 0
-            nn = 0
+                test_predictions_ag = []
+                soft_labels_ag =[]
 
-            # Do multi-scale aggregation
-            scales = [1.0, 1.5, 2.0]
+                rr = 0
+                rn = 0
+                nr = 0
+                nn = 0
 
-            def multi_scale_aggregation(input_images):
-                batch_size, h, w, _ = input_images.shape
-                valid_soft_lst = []
-                valid_predict_lst = []
-                for i in range(batch_size):
-                    image = input_images[i, :, :, :]
+                # Do multi-scale aggregation
+                scales = [1.0, 1.5, 2.0]
 
-                    soft_labels = []
-                    for scale in scales:
-                        h_new = int(h * scale)
-                        w_new = int(w * scale)
-                        image_scaled = cv2.resize(image, (h_new, w_new), interpolation=cv2.INTER_LINEAR)
-                        image_scaled = Image.fromarray(image_scaled)
-                        for idx in range(1):
-                            image_rot = np.array(image_scaled.rotate(idx * 90))[None, ...]
-                            predict, soft = sess.run([pred_hard, soft_label],
-                                                     feed_dict={input_placeholder: image_rot})
-                            # predict = np.array((Image.fromarray(predict[0, :, :, :])).rotate(-idx*90))
-                            # soft = np.array((Image.fromarray(soft[0, :, :, :])).rotate(-idx*90))
-                            predict = ndimage.rotate(predict[0, :, :, :], -idx * 90)
-                            soft = ndimage.rotate(soft[0, :, :, :], -idx * 90)
+                def multi_scale_aggregation(input_images):
+                    batch_size, h, w, _ = input_images.shape
+                    valid_soft_lst = []
+                    valid_predict_lst = []
+                    for i in range(batch_size):
+                        image = input_images[i, :, :, :]
 
-                            soft_labels.append(cv2.resize(soft, (h, w), interpolation=cv2.INTER_NEAREST)[..., None])
+                        soft_labels = []
+                        for scale in scales:
+                            h_new = int(h * scale)
+                            w_new = int(w * scale)
+                            image_scaled = cv2.resize(image, (h_new, w_new), interpolation=cv2.INTER_LINEAR)
+                            image_scaled = Image.fromarray(image_scaled)
+                            for idx in range(1):
+                                image_rot = np.array(image_scaled.rotate(idx * 90))[None, ...]
+                                predict, soft = sess.run([pred_hard, soft_label],
+                                                         feed_dict={input_placeholder: image_rot})
+                                # predict = np.array((Image.fromarray(predict[0, :, :, :])).rotate(-idx*90))
+                                # soft = np.array((Image.fromarray(soft[0, :, :, :])).rotate(-idx*90))
+                                predict = ndimage.rotate(predict[0, :, :, :], -idx * 90)
+                                soft = ndimage.rotate(soft[0, :, :, :], -idx * 90)
 
-                    # ipdb.set_trace()
-                    # Average the predictions
-                    soft_label_final = np.concatenate(tuple(soft_labels), axis=-1)
-                    soft_label_final = np.mean(soft_label_final, axis=-1)
-                    valid_soft_lst.append(soft_label_final[None, ...])
-                    valid_predict_lst.append(np.argmax(soft_label_final, axis=-1)[None, ...])
+                                soft_labels.append(cv2.resize(soft, (h, w), interpolation=cv2.INTER_NEAREST)[..., None])
 
-                # Concat back to batch
-                valid_soft = np.concatenate(tuple(valid_soft_lst), axis=0)
-                valid_predict = np.concatenate(tuple(valid_predict_lst), axis=0)[..., None]
+                        # ipdb.set_trace()
+                        # Average the predictions
+                        soft_label_final = np.concatenate(tuple(soft_labels), axis=-1)
+                        soft_label_final = np.mean(soft_label_final, axis=-1)
+                        valid_soft_lst.append(soft_label_final[None, ...])
+                        valid_predict_lst.append(np.argmax(soft_label_final, axis=-1)[None, ...])
 
-                return valid_soft, valid_predict
+                    # Concat back to batch
+                    valid_soft = np.concatenate(tuple(valid_soft_lst), axis=0)
+                    valid_predict = np.concatenate(tuple(valid_predict_lst), axis=0)[..., None]
 
-            try:
-                while True:
-                    ###################
-                    ## Original part ##
-                    ###################
-                    if (FLAGS.use_external):
-                        test_image, test_labels, ids = sess.run(next_test)
-                    else:
-                        test_image, ids = sess.run(next_test)
-                    
-                    test_predict, test_soft = sess.run([pred_hard, soft_label], feed_dict={input_placeholder : test_image})
-                    test_predictions.extend(test_predict)
-                    
-                    if (FLAGS.use_external):
-                        rr += np.sum((test_predict == 1) * (test_labels == 1))
-                        rn += np.sum((test_predict == 1) * (test_labels == 0))
-                        nr += np.sum((test_predict == 0) * (test_labels == 1))
-                        nn += np.sum((test_predict == 0) * (test_labels == 0))
-                    
-                    test_images.extend(test_image)
-                    test_ids.extend(ids)
-                    soft_labels.extend(test_soft)
-                    print(ids)
+                    return valid_soft, valid_predict
 
-                    ######################
-                    ## Aggregation part ##
-                    ######################
-                    test_soft2, test_predict2 = multi_scale_aggregation(test_image)
-                    soft_labels_ag.extend(test_soft2)
+                try:
+                    while True:
+                        ###################
+                        ## Original part ##
+                        ###################
+                        if (FLAGS.use_external):
+                            test_image, test_labels, ids = sess.run(next_test)
+                        else:
+                            test_image, ids = sess.run(next_test)
 
-            except tf.errors.OutOfRangeError:
-                print('[INFO] Test Done.')
+                        test_predict, test_soft = sess.run([pred_hard, soft_label], feed_dict={input_placeholder : test_image})
+                        test_predictions.extend(test_predict)
+
+                        if (FLAGS.use_external):
+                            rr += np.sum((test_predict == 1) * (test_labels == 1))
+                            rn += np.sum((test_predict == 1) * (test_labels == 0))
+                            nr += np.sum((test_predict == 0) * (test_labels == 1))
+                            nn += np.sum((test_predict == 0) * (test_labels == 0))
+
+                        test_images.extend(test_image)
+                        test_ids.extend(ids)
+                        soft_labels.extend(test_soft)
+                        print(ids)
+
+                        ######################
+                        ## Aggregation part ##
+                        ######################
+                        test_soft2, test_predict2 = multi_scale_aggregation(test_image)
+                        soft_labels_ag.extend(test_soft2)
+
+                except tf.errors.OutOfRangeError:
+                    print('[INFO] Test Done.')
 
 
-            if (FLAGS.save_csv_file):
-                print('[INFO] Write to csv file')
-                create_submission_files(test_predictions, test_ids, save_output_path, step)
-            if (FLAGS.save_soft_masks):
-                print('[INFO] Generating soft label masks')
-                create_soft_label_mask(soft_labels, save_output_path, step)
-                create_soft_label_mask_ag(soft_labels_ag, save_output_path, step)
+                if (FLAGS.save_csv_file):
+                    print('[INFO] Write to csv file')
+                    create_submission_files(test_predictions, test_ids, save_output_path, step)
+                if (FLAGS.save_soft_masks):
+                    print('[INFO] Generating soft label masks')
+                    create_soft_label_mask(soft_labels, save_output_path, step)
+                    create_soft_label_mask_ag(soft_labels_ag, save_output_path, step)
 
-            # if (FLAGS.use_external):
-            #     mIoU = ( 0.5 * rr / (rr + rn + nr) ) + ( 0.5 * nn / (nn + rn + nr) )
-            #     print('[INFO] Validation mIoU')
-            #     print (mIoU)
-            # else :
-            # Perform validation
-            sess.run(init_valid)
-            valid_soft_labels = []
-            accuracy_lst = []
+                # if (FLAGS.use_external):
+                #     mIoU = ( 0.5 * rr / (rr + rn + nr) ) + ( 0.5 * nn / (nn + rn + nr) )
+                #     print('[INFO] Validation mIoU')
+                #     print (mIoU)
+                # else :
+                # Perform validation
+                sess.run(init_valid)
+                valid_soft_labels = []
+                accuracy_lst = []
 
-            valid_soft_labels_ag = []
-            accuracy_lst_ag = []
+                valid_soft_labels_ag = []
+                accuracy_lst_ag = []
 
-            rr_ag = 0
-            rn_ag = 0
-            nr_ag = 0
-            nn_ag = 0
+                rr_ag = 0
+                rn_ag = 0
+                nr_ag = 0
+                nn_ag = 0
 
-            try:
-                while True:
-                    # Compute mIoU
-                    valid_image, valid_labels = sess.run(next_valid)
-                    valid_predict, valid_soft = sess.run([pred_hard, soft_label], feed_dict={input_placeholder : valid_image})
-                    rr += np.sum((valid_predict == 1) * (valid_labels == 1))
-                    rn += np.sum((valid_predict == 1) * (valid_labels == 0))
-                    nr += np.sum((valid_predict == 0) * (valid_labels == 1))
-                    nn += np.sum((valid_predict == 0) * (valid_labels == 0))
-                    valid_soft_labels.extend(valid_soft)
+                try:
+                    while True:
+                        # Compute mIoU
+                        valid_image, valid_labels = sess.run(next_valid)
+                        valid_predict, valid_soft = sess.run([pred_hard, soft_label], feed_dict={input_placeholder : valid_image})
+                        rr += np.sum((valid_predict == 1) * (valid_labels == 1))
+                        rn += np.sum((valid_predict == 1) * (valid_labels == 0))
+                        nr += np.sum((valid_predict == 0) * (valid_labels == 1))
+                        nn += np.sum((valid_predict == 0) * (valid_labels == 0))
+                        valid_soft_labels.extend(valid_soft)
 
-                    # Compute accuracy
-                    valid_accuracy = np.mean((valid_predict == valid_labels).astype(np.int32))
-                    accuracy_lst.append(valid_accuracy)
+                        # Compute accuracy
+                        valid_accuracy = np.mean((valid_predict == valid_labels).astype(np.int32))
+                        accuracy_lst.append(valid_accuracy)
 
-                    valid_soft, valid_predict = multi_scale_aggregation(valid_image)
-                    # ipdb.set_trace()
-                    rr_ag += np.sum((valid_predict == 1) * (valid_labels == 1))
-                    rn_ag += np.sum((valid_predict == 1) * (valid_labels == 0))
-                    nr_ag += np.sum((valid_predict == 0) * (valid_labels == 1))
-                    nn_ag += np.sum((valid_predict == 0) * (valid_labels == 0))
+                        valid_soft, valid_predict = multi_scale_aggregation(valid_image)
+                        # ipdb.set_trace()
+                        rr_ag += np.sum((valid_predict == 1) * (valid_labels == 1))
+                        rn_ag += np.sum((valid_predict == 1) * (valid_labels == 0))
+                        nr_ag += np.sum((valid_predict == 0) * (valid_labels == 1))
+                        nn_ag += np.sum((valid_predict == 0) * (valid_labels == 0))
 
-                    valid_accuracy = np.mean((valid_predict == valid_labels).astype(np.int32))
+                        valid_accuracy = np.mean((valid_predict == valid_labels).astype(np.int32))
 
-                    valid_soft_labels_ag.append(valid_soft)
-                    accuracy_lst_ag.append(valid_accuracy)
+                        valid_soft_labels_ag.append(valid_soft)
+                        accuracy_lst_ag.append(valid_accuracy)
 
-            except tf.errors.OutOfRangeError:
-                print('[INFO] Valid Done.')
+                except tf.errors.OutOfRangeError:
+                    print('[INFO] Valid Done.')
 
-            # Original
-            mIoU = (0.5 * rr / (rr + rn + nr)) + (0.5 * nn / (nn + rn + nr))
-            valid_accuracy = np.mean(np.array(accuracy_lst))
+                # Original
+                mIoU = (0.5 * rr / (rr + rn + nr)) + (0.5 * nn / (nn + rn + nr))
+                valid_accuracy = np.mean(np.array(accuracy_lst))
 
-            # Aggregated
-            mIoU_ag = (0.5 * rr_ag / (rr_ag + rn_ag + nr_ag)) + (0.5 * nn_ag / (nn_ag + rn_ag + nr_ag))
-            valid_accuracy_ag = np.mean(np.array(accuracy_lst_ag))
+                # Aggregated
+                mIoU_ag = (0.5 * rr_ag / (rr_ag + rn_ag + nr_ag)) + (0.5 * nn_ag / (nn_ag + rn_ag + nr_ag))
+                valid_accuracy_ag = np.mean(np.array(accuracy_lst_ag))
 
-            # ipdb.set_trace()
+                # ipdb.set_trace()
 
-            print('[INFO] Validation Reslults')
-            print("\t mIoU:", mIoU)
-            print("\t Accuracy:", valid_accuracy)
-            if (FLAGS.save_soft_masks):
-                create_valid_soft_label(valid_soft_labels, save_output_path, step)
+                print('[INFO] Validation Reslults')
+                print("\t mIoU:", mIoU)
+                print("\t Accuracy:", valid_accuracy)
+                if (FLAGS.save_soft_masks):
+                    create_valid_soft_label(valid_soft_labels, save_output_path, step)
 
-            # ipdb.set_trace()
-            # Record summary
-            val_summary = tf.Summary()
-            val_summary.value.add(tag="val_accuracy", simple_value=valid_accuracy)
-            val_summary.value.add(tag="val_mIoU", simple_value=mIoU)
-            val_summary.value.add(tag="val_accuracy_ag", simple_value=valid_accuracy_ag)
-            val_summary.value.add(tag="val_mIoU_ag", simple_value=mIoU_ag)
+                # ipdb.set_trace()
+                # Record summary
+                val_summary = tf.Summary()
+                val_summary.value.add(tag="val_accuracy", simple_value=valid_accuracy)
+                val_summary.value.add(tag="val_mIoU", simple_value=mIoU)
+                val_summary.value.add(tag="val_accuracy_ag", simple_value=valid_accuracy_ag)
+                val_summary.value.add(tag="val_mIoU_ag", simple_value=mIoU_ag)
 
-            writer.add_summary(val_summary, global_step=step)
+                writer.add_summary(val_summary, global_step=step)
 
-        #Training loop
-        images, labels = sess.run(next_data)
+            #Training loop
+            images, labels = sess.run(next_data)
 
-        if (step) % 50 == 0 :
-            summary, _, _ = sess.run([merged, feature_opt, decoder_opt],
-                            feed_dict={input_placeholder: images, label_placeholder: labels,
-                                       test_rgb_placeholder: test_images[0:10],
-                                       test_mask_placeholder: test_predictions[0:10]})
-            duration = time.time() - start_time
-            print('Step %d: %.3f sec' % (step, duration))
+            if (step) % 50 == 0 :
+                summary, _, _ = sess.run([merged, feature_opt, decoder_opt],
+                                feed_dict={input_placeholder: images, label_placeholder: labels,
+                                           test_rgb_placeholder: test_images[0:10],
+                                           test_mask_placeholder: test_predictions[0:10]})
+                duration = time.time() - start_time
+                print('Step %d: %.3f sec' % (step, duration))
 
-            writer.add_summary(summary, step)
-            start_time = time.time()
+                writer.add_summary(summary, step)
+                start_time = time.time()
 
-        else:
-            _, _ = sess.run([feature_opt, decoder_opt],
-                            feed_dict={input_placeholder: images, label_placeholder: labels,
-                                       test_rgb_placeholder: test_images[0:10],
-                                       test_mask_placeholder: test_predictions[0:10]})
-        
+            else:
+                _, _ = sess.run([feature_opt, decoder_opt],
+                                feed_dict={input_placeholder: images, label_placeholder: labels,
+                                           test_rgb_placeholder: test_images[0:10],
+                                           test_mask_placeholder: test_predictions[0:10]})
 
-        if (step) % 1000 == 0 and not step == 0 :
-            feature_saver.save(sess, os.path.join(save_model_path, 'encoder.ckpt'), global_step = step)
-            decoder_saver.save(sess, os.path.join(save_model_path, 'decoder.ckpt'), global_step = step)
+
+            if (step) % 1000 == 0 and not step == 0 :
+                feature_saver.save(sess, os.path.join(save_model_path, 'encoder.ckpt'), global_step = step)
+                decoder_saver.save(sess, os.path.join(save_model_path, 'decoder.ckpt'), global_step = step)
+
+    # Pure testing mode
+    elif FLAGS.mode == "test":
+        print('Testing.....')
+
+        test_images = []
+        test_predictions = []
+        test_ids = []
+        soft_labels = []
+        sess.run(init_test)
+
+        test_predictions_ag = []
+        soft_labels_ag = []
+
+        rr = 0
+        rn = 0
+        nr = 0
+        nn = 0
+
+        # Do multi-scale aggregation
+        scales = [1.0, 1.5, 2.0]
+
+        def multi_scale_aggregation(input_images):
+            batch_size, h, w, _ = input_images.shape
+            valid_soft_lst = []
+            valid_predict_lst = []
+            for i in range(batch_size):
+                image = input_images[i, :, :, :]
+
+                soft_labels = []
+                for scale in scales:
+                    h_new = int(h * scale)
+                    w_new = int(w * scale)
+                    image_scaled = cv2.resize(image, (h_new, w_new), interpolation=cv2.INTER_LINEAR)
+                    image_scaled = Image.fromarray(image_scaled)
+                    for idx in range(1):
+                        image_rot = np.array(image_scaled.rotate(idx * 90))[None, ...]
+                        predict, soft = sess.run([pred_hard, soft_label],
+                                                 feed_dict={input_placeholder: image_rot})
+                        # predict = np.array((Image.fromarray(predict[0, :, :, :])).rotate(-idx*90))
+                        # soft = np.array((Image.fromarray(soft[0, :, :, :])).rotate(-idx*90))
+                        predict = ndimage.rotate(predict[0, :, :, :], -idx * 90)
+                        soft = ndimage.rotate(soft[0, :, :, :], -idx * 90)
+
+                        soft_labels.append(cv2.resize(soft, (h, w), interpolation=cv2.INTER_NEAREST)[..., None])
+
+                # ipdb.set_trace()
+                # Average the predictions
+                soft_label_final = np.concatenate(tuple(soft_labels), axis=-1)
+                soft_label_final = np.mean(soft_label_final, axis=-1)
+                valid_soft_lst.append(soft_label_final[None, ...])
+                valid_predict_lst.append(np.argmax(soft_label_final, axis=-1)[None, ...])
+
+            # Concat back to batch
+            valid_soft = np.concatenate(tuple(valid_soft_lst), axis=0)
+            valid_predict = np.concatenate(tuple(valid_predict_lst), axis=0)[..., None]
+
+            return valid_soft, valid_predict
+
+        try:
+            while True:
+                ###################
+                ## Original part ##
+                ###################
+                if (FLAGS.use_external):
+                    test_image, test_labels, ids = sess.run(next_test)
+                else:
+                    test_image, ids = sess.run(next_test)
+
+                test_predict, test_soft = sess.run([pred_hard, soft_label], feed_dict={input_placeholder: test_image})
+                test_predictions.extend(test_predict)
+
+                if (FLAGS.use_external):
+                    rr += np.sum((test_predict == 1) * (test_labels == 1))
+                    rn += np.sum((test_predict == 1) * (test_labels == 0))
+                    nr += np.sum((test_predict == 0) * (test_labels == 1))
+                    nn += np.sum((test_predict == 0) * (test_labels == 0))
+
+                test_images.extend(test_image)
+                test_ids.extend(ids)
+                soft_labels.extend(test_soft)
+                print(ids)
+
+                ######################
+                ## Aggregation part ##
+                ######################
+                test_soft2, test_predict2 = multi_scale_aggregation(test_image)
+                soft_labels_ag.extend(test_soft2)
+
+        except tf.errors.OutOfRangeError:
+            print('[INFO] Test Done.')
+
+        if (FLAGS.save_csv_file):
+            print('[INFO] Write to csv file')
+            create_submission_files(test_predictions, test_ids, save_output_path, 0)
+        if (FLAGS.save_soft_masks):
+            print('[INFO] Generating soft label masks')
+            create_soft_label_mask(soft_labels, save_output_path, 0)
+            create_soft_label_mask_ag(soft_labels_ag, save_output_path, 0)
+
+        # if (FLAGS.use_external):
+        #     mIoU = ( 0.5 * rr / (rr + rn + nr) ) + ( 0.5 * nn / (nn + rn + nr) )
+        #     print('[INFO] Validation mIoU')
+        #     print (mIoU)
+        # else :
+        # Perform validation
+        sess.run(init_valid)
+        valid_soft_labels = []
+        accuracy_lst = []
+
+        valid_soft_labels_ag = []
+        accuracy_lst_ag = []
+
+        rr_ag = 0
+        rn_ag = 0
+        nr_ag = 0
+        nn_ag = 0
+
+        try:
+            while True:
+                # Compute mIoU
+                valid_image, valid_labels = sess.run(next_valid)
+                valid_predict, valid_soft = sess.run([pred_hard, soft_label],
+                                                     feed_dict={input_placeholder: valid_image})
+                rr += np.sum((valid_predict == 1) * (valid_labels == 1))
+                rn += np.sum((valid_predict == 1) * (valid_labels == 0))
+                nr += np.sum((valid_predict == 0) * (valid_labels == 1))
+                nn += np.sum((valid_predict == 0) * (valid_labels == 0))
+                valid_soft_labels.extend(valid_soft)
+
+                # Compute accuracy
+                valid_accuracy = np.mean((valid_predict == valid_labels).astype(np.int32))
+                accuracy_lst.append(valid_accuracy)
+
+                valid_soft, valid_predict = multi_scale_aggregation(valid_image)
+                # ipdb.set_trace()
+                rr_ag += np.sum((valid_predict == 1) * (valid_labels == 1))
+                rn_ag += np.sum((valid_predict == 1) * (valid_labels == 0))
+                nr_ag += np.sum((valid_predict == 0) * (valid_labels == 1))
+                nn_ag += np.sum((valid_predict == 0) * (valid_labels == 0))
+
+                valid_accuracy = np.mean((valid_predict == valid_labels).astype(np.int32))
+
+                valid_soft_labels_ag.append(valid_soft)
+                accuracy_lst_ag.append(valid_accuracy)
+
+        except tf.errors.OutOfRangeError:
+            print('[INFO] Valid Done.')
+
+        # Original
+        mIoU = (0.5 * rr / (rr + rn + nr)) + (0.5 * nn / (nn + rn + nr))
+        valid_accuracy = np.mean(np.array(accuracy_lst))
+
+        # Aggregated
+        mIoU_ag = (0.5 * rr_ag / (rr_ag + rn_ag + nr_ag)) + (0.5 * nn_ag / (nn_ag + rn_ag + nr_ag))
+        valid_accuracy_ag = np.mean(np.array(accuracy_lst_ag))
+
+        print('[INFO] Validation Reslults')
+        print("\t mIoU:", mIoU)
+        print("\t Accuracy:", valid_accuracy)
+        print('[INFO] Multi-scale Aggregation Results')
+        print("\t mIoU", mIoU_ag)
+        print("\t Accuracy:", valid_accuracy_ag)
+        if (FLAGS.save_soft_masks):
+            create_valid_soft_label(valid_soft_labels, save_output_path, 0)
+
+    else:
+        raise ValueError("Unknow mode! Use 'train' or 'test' instead...")
 
 
 if __name__ == '__main__':

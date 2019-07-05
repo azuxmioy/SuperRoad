@@ -209,7 +209,7 @@ if __name__ == '__main__':
         bk.set_neighbors(pairwise)
         cost = bk.minimize()
         prediction = bk.get_labeling()
-        
+
         smooth_mask = np.reshape(prediction, [img.shape[0], img.shape[1]])
         test_output.append(smooth_mask)
         '''
